@@ -70,7 +70,16 @@ python -u deck_qwen.py --offline --backend vulkan --threads 4 --tokens 16 2>&1 |
 
 This hybrid backend sends both packed matrix multiplications in each LittleBit branch (including the residual branch) to a hardware Vulkan adapter. It caches packed factors in GPU buffers. Activations and results cross the CPU/GPU boundary for each multiplication. Attention, scales, embeddings and the output head run on CPU. Dispatch and readback costs can outweigh the savings. No ROCm installation is needed.
 
-At startup the runner prints the selected adapter after comparing shader output against a NumPy reference on known random inputs. A missing hardware adapter or a failed check stops the run. GPU upload is lazy, so the first-token time includes weight uploads; load time includes adapter setup. Process RSS excludes any driver allocations outside the process accounting. Compare the output text, token counts and decode rate at the same power limit as the CPU run. The shader accumulates in FP32 and rounds the result to the activation dtype, so greedy token choices can diverge. Physical GPU throughput and end-to-end numerical agreement are pending.
+At startup the runner prints the selected adapter after comparing shader output against a NumPy reference on known random inputs. A missing hardware adapter or a failed check stops the run. GPU upload is lazy, so the first-token time includes weight uploads; load time includes adapter setup. Process RSS excludes any driver allocations outside the process accounting. Compare the output text, token counts and decode rate at the same power limit as the CPU run. The shader accumulates in FP32 and rounds the result to the activation dtype, so greedy token choices can diverge. On the Steam Deck OLED, the shader self-test passed on the AMD Custom GPU 0932 (RADV VANGOGH, Mesa 26.2.0-devel). The run completed with exit code 0 despite a warning about VK_EXT_physical_device_drm.
+
+| Metric | CPU | Hybrid Vulkan |
+| --- | ---: | ---: |
+| Model load (s) | 3.90 | 2.51 |
+| Time to first token (s) | 9.91 | 3.81 |
+| Decode rate (tokens/s) | 0.2180 | 0.4357 |
+| Peak process RSS (MiB) | 2140.0 | 2147.1 |
+
+Both runs used the same checkpoint revision, four CPU threads, a 19-token prompt and 16 generated tokens. The Vulkan run decoded 2.00 times as fast across the 15 steps after the first token. These are single runs. The generated continuations differed, and neither named Madrid within the token limit. End-to-end numerical agreement and WikiText-2 perplexity on this device remain unmeasured.
 
 ## Measured CPU results
 
