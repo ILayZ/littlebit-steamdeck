@@ -52,9 +52,25 @@ python -u deck_qwen.py --offline --ppl-blocks 0 2>&1 | tee deck-ppl-full.log
 
 **Troubleshooting.** If the download fails, check free disk space with `df -h ~/.cache`. If the process exits with `Killed`, check the kernel log with `journalctl -k -b | grep -Ei 'out of memory|oom|killed process' | tail`. When reporting a problem, include `deck-generation.log` or the last lines of the error, the output of `free -h`, and the perplexity log if you ran that test.
 
-The loader in `deck_qwen.py` builds the Qwen3 model structure without allocating the original 8 billion dense weights. Factor signs stay packed between layers and are unpacked for each matrix multiplication. Bit decoding, row padding, and the command-line interface have been checked. A full run on a physical Steam Deck is still pending.
+The loader in `deck_qwen.py` builds the Qwen3 model structure without allocating the original 8 billion dense weights. Factor signs stay packed between layers and are unpacked for each matrix multiplication. Bit decoding, row padding, and the command-line interface have been checked. A physical Steam Deck OLED completed the CPU generation test with four threads. The observed prompt took 9.91 seconds to produce the first token, followed by 0.218 tokens/s over 15 decode steps. Loading took 3.90 seconds and peak process RSS was 2,140 MiB. The 16-token output repeated the question and began a citation. This single prompt does not measure perplexity.
 
 [Model card and metrics](https://huggingface.co/LittleBitLLM/littlebit-qwen3-8b-0.55bpw) · [SamsungLabs binary factor format](https://github.com/SamsungLabs/LittleBit/blob/0ceadcfa842b2c26e14a6e00d98d47aed8e53dde/quantization/utils/binary_packer.py)
+
+## Experimental Vulkan offload on Steam Deck OLED
+
+Use the same Bash session, model cache, CPU PyTorch wheel and virtual environment described above. From the repository root:
+
+```bash
+git pull --ff-only
+source .venv-deck/bin/activate
+uv pip install 'wgpu==0.31.1'
+set -o pipefail
+python -u deck_qwen.py --offline --backend vulkan --threads 4 --tokens 16 2>&1 | tee deck-vulkan.log
+```
+
+This hybrid backend sends both packed matrix multiplications in each LittleBit branch (including the residual branch) to a hardware Vulkan adapter. It caches packed factors in GPU buffers. Activations and results cross the CPU/GPU boundary for each multiplication. Attention, scales, embeddings and the output head run on CPU. Dispatch and readback costs can outweigh the savings. No ROCm installation is needed.
+
+At startup the runner prints the selected adapter after comparing shader output against a NumPy reference on known random inputs. A missing hardware adapter or a failed check stops the run. GPU upload is lazy, so the first-token time includes weight uploads; load time includes adapter setup. Process RSS excludes any driver allocations outside the process accounting. Compare the output text, token counts and decode rate at the same power limit as the CPU run. The shader accumulates in FP32 and rounds the result to the activation dtype, so greedy token choices can diverge. Physical GPU throughput and end-to-end numerical agreement are pending.
 
 ## Measured CPU results
 

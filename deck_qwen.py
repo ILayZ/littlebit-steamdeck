@@ -1,4 +1,4 @@
-"""CPU-only runner for the pinned LittleBitLLM Qwen3-8B checkpoint."""
+"""CPU and hybrid Vulkan runner for the pinned LittleBitLLM Qwen3-8B checkpoint."""
 import argparse
 import json
 import math
@@ -21,7 +21,7 @@ def signs(words, shape):
     return 1 - 2 * bits.astype(np.int8)
 
 
-def load(path):
+def load(path, gpu=None):
     import torch
     from accelerate import init_empty_weights
     from safetensors import safe_open
@@ -51,6 +51,8 @@ def load(path):
             result = None
             for v, vs, u, us, col, latent, row in self.parts:
                 def linear(value, words, shape):
+                    if gpu is not None:
+                        return gpu.linear(value, words, shape)
                     weight = torch.from_numpy(signs(words.numpy(), shape)).to(value.dtype)
                     return torch.nn.functional.linear(value, weight)
                 y = linear(x * col, v, vs)
@@ -123,6 +125,7 @@ def perplexity(model, tokenizer, limit):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--backend", choices=("cpu", "vulkan"), default="cpu")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--tokens", type=int, default=16)
     p.add_argument("--ppl-blocks", type=int, help="2048-token blocks, 0 for all")
@@ -142,9 +145,15 @@ def main():
     torch.set_num_threads(args.threads)
     tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
     start = time.perf_counter()
-    model = load(path)
+    gpu = None
+    if args.backend == "vulkan":
+        from deck_vulkan import VulkanFactors
+        gpu = VulkanFactors()
+        print(f"Vulkan factor self-test passed: {gpu.info}", flush=True)
+    model = load(path, gpu)
     result = dict(model=MODEL, revision=REV, torch=torch.__version__, threads=args.threads,
                   load_s=time.perf_counter()-start)
+    result.update(backend=args.backend, adapter=gpu.info if gpu else None)
     with torch.inference_mode():
         if args.ppl_blocks is None:
             result.update(benchmark(model, tokenizer, args.tokens))
