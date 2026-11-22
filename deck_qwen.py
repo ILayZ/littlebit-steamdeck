@@ -83,10 +83,14 @@ def load(path, gpu=None):
     return model.eval()
 
 
-def benchmark(model, tokenizer, count):
-    prompt = tokenizer.apply_chat_template(
+def benchmark_prompt(tokenizer):
+    return tokenizer.apply_chat_template(
         [{"role": "user", "content": "What is the capital of Spain?"}],
         tokenize=True, add_generation_prompt=True, enable_thinking=False, return_tensors="pt")
+
+
+def benchmark(model, tokenizer, count):
+    prompt = benchmark_prompt(tokenizer)
     start = time.perf_counter()
     out = model(prompt, use_cache=True, logits_to_keep=1)
     token = out.logits[:, -1].argmax(-1, keepdim=True)
@@ -101,6 +105,63 @@ def benchmark(model, tokenizer, count):
     return dict(prompt_tokens=prompt.shape[1], output_tokens=len(ids), first_token_s=first,
                 decode_tokens_s=(len(ids)-1)/elapsed if len(ids)>1 else None,
                 text=tokenizer.decode(ids, skip_special_tokens=True))
+
+
+def logit_trace(model, prompt, limit, eos_id, forced=None):
+    """Record next-token scores, feeding either CPU choices or their replay."""
+    import numpy as np
+
+    current, cache = prompt, None
+    scores, chosen = [], []
+    for i in range(limit):
+        output = model(current, past_key_values=cache, use_cache=True, logits_to_keep=1)
+        cache = output.past_key_values
+        row = output.logits[0, -1].float().numpy().copy()
+        if not np.isfinite(row).all():
+            raise ValueError(f"Non-finite logits at output position {i + 1}")
+        scores.append(row)
+        token = int(row.argmax()) if forced is None else forced[i]
+        chosen.append(token)
+        if token == eos_id:
+            break
+        current = prompt.new_tensor([[token]])
+    return scores, chosen
+
+
+def compare_position(cpu, vulkan, tokenizer, position):
+    import numpy as np
+
+    def best(row):
+        token = int(row.argmax())
+        second = np.partition(row, -2)[-2]
+        return {"id": token, "text": tokenizer.decode([token]),
+                "top2_gap": float(row[token] - second)}
+
+    delta = vulkan - cpu
+    return {"position": position, "cpu": best(cpu), "vulkan": best(vulkan),
+            "max_abs_logit_delta": float(np.max(np.abs(delta))),
+            "rms_logit_delta": float(np.sqrt(np.mean(delta.astype(np.float64)**2)))}
+
+
+def compare_backends(path, tokenizer, count):
+    import gc
+    from deck_vulkan import VulkanFactors
+
+    prompt = benchmark_prompt(tokenizer)
+    print("Recording CPU greedy trajectory...", flush=True)
+    cpu_model = load(path)
+    cpu, tokens = logit_trace(cpu_model, prompt, count, tokenizer.eos_token_id)
+    del cpu_model
+    gc.collect()
+    gpu = VulkanFactors()
+    print(f"Replaying CPU token IDs on Vulkan: {gpu.info}", flush=True)
+    vulkan, _ = logit_trace(load(path, gpu), prompt, len(tokens), tokenizer.eos_token_id, tokens)
+    rows = [compare_position(a, b, tokenizer, pos)
+            for pos, (a, b) in enumerate(zip(cpu, vulkan, strict=True), 1)]
+    mismatches = [r["position"] for r in rows if r["cpu"]["id"] != r["vulkan"]["id"]]
+    return {"adapter": gpu.info, "prompt_tokens": prompt.shape[1], "positions": rows,
+            "top1_matches": len(rows) - len(mismatches), "compared_tokens": len(rows),
+            "first_top1_mismatch": mismatches[0] if mismatches else None}
 
 
 def perplexity(model, tokenizer, limit):
@@ -125,7 +186,7 @@ def perplexity(model, tokenizer, limit):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--backend", choices=("cpu", "vulkan"), default="cpu")
+    p.add_argument("--backend", choices=("cpu", "vulkan", "compare"), default="cpu")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--tokens", type=int, default=16)
     p.add_argument("--ppl-blocks", type=int, help="2048-token blocks, 0 for all")
@@ -134,6 +195,8 @@ def main():
     args = p.parse_args()
     if min(args.threads,args.tokens)<1 or (args.ppl_blocks is not None and args.ppl_blocks<0):
         p.error("threads/tokens must be positive and ppl-blocks nonnegative")
+    if args.backend == "compare" and args.ppl_blocks is not None:
+        p.error("use --tokens for paired next-token comparison")
     from huggingface_hub import snapshot_download
     path = Path(snapshot_download(MODEL, revision=REV, local_files_only=args.offline,
                                   allow_patterns=["*.json","*.safetensors","merges.txt","vocab.txt"]))
@@ -144,6 +207,12 @@ def main():
     from transformers import AutoTokenizer
     torch.set_num_threads(args.threads)
     tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
+    if args.backend == "compare":
+        with torch.inference_mode():
+            report = compare_backends(path, tokenizer, args.tokens)
+        report.update(model=MODEL, revision=REV, torch=torch.__version__, threads=args.threads)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
     start = time.perf_counter()
     gpu = None
     if args.backend == "vulkan":
