@@ -1,0 +1,38 @@
+{
+  "fp32": {
+    "tokens": 537,
+    "perplexity": 6.940392121531501
+  },
+  "svid-0.5": {
+    "projection_bpw": 0.6320621468926554,
+    "relative_frobenius": 0.8420316638764718,
+    "model_payload_bytes": 84844,
+    "archive_bytes": 128522,
+    "tokens": 537,
+    "perplexity": 666465848.6657585
+  },
+  "itq-0.5": {
+    "projection_bpw": 0.6320621468926554,
+    "relative_frobenius": 0.8225696518250524,
+    "model_payload_bytes": 84844,
+    "archive_bytes": 128522,
+    "tokens": 537,
+    "perplexity": 509708126.4335896
+  },
+  "svid-1.0": {
+    "projection_bpw": 0.8990112994350282,
+    "relative_frobenius": 0.7925729627023368,
+    "model_payload_bytes": 92404,
+    "archive_bytes": 136082,
+    "tokens": 537,
+    "perplexity": 19239280.39977374
+  },
+  "itq-1.0": {
+    "projection_bpw": 0.8990112994350282,
+    "relative_frobenius": 0.7459011567501974,
+    "model_payload_bytes": 92404,
+    "archive_bytes": 136082,
+    "tokens": 537,
+    "perplexity": 851783.007556955
+  }
+}

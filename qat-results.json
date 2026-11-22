@@ -1,0 +1,14 @@
+{
+  "steps": 256,
+  "training_sequences": 128,
+  "results": {
+    "svid": {
+      "tokens": 537,
+      "perplexity": 102.71791051413197
+    },
+    "itq": {
+      "tokens": 537,
+      "perplexity": 85.53389094307833
+    }
+  }
+}
