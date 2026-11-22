@@ -2,6 +2,60 @@
 
 **Target: Llama-2-7B. Executed CPU experiment: TinyStories-260K.** The 7B runner uses SamsungLabs' implementation. The CPU experiment is an independent, scaled-down reproduction with working packed checkpoints. Only the latter has been run here.
 
+## Локальный запуск Qwen3-8B на Steam Deck
+
+Цель — измерить пиковую RAM, время до первого токена и скорость генерации готовой модели **Qwen3-8B LittleBit-2 (0,55 BPW)**. Тест работает на CPU в Desktop Mode. Обучение, CUDA, ROCm и SSH не нужны. Веса занимают около 3 ГБ на диске. Для загрузки, Python и зависимостей желательно иметь 8 ГБ свободного места. Фактический пик RAM покажет тест.
+
+**1. Установка.** Переключись в Desktop Mode, открой Konsole и выполни отдельной командой `bash`. Следующие блоки рассчитаны на Bash. Команды ставят Python и пакеты в домашний каталог без sudo. Если репозиторий уже клонирован, вместо первых двух строк перейди в его каталог и выполни `git pull --ff-only`.
+
+```bash
+git clone https://github.com/ILayZ/littlebit-steamdeck.git
+cd littlebit-steamdeck
+df -h .
+free -h
+command -v uv >/dev/null || curl --proto '=https' -fsSL https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv python install 3.12
+uv venv --python 3.12 .venv-deck
+source .venv-deck/bin/activate
+uv pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.6.0'
+uv pip install 'transformers==4.51.3' 'accelerate==1.6.0' 'numpy==2.2.4' 'huggingface-hub==0.30.2' 'safetensors==0.5.3'
+```
+
+**2. Скачай модель один раз.** Команда загрузит закреплённую публичную версию в кеш Hugging Face. Аккаунт не требуется. После обрыва сети можно повторить команду.
+
+```bash
+python deck_qwen.py --download-only
+```
+
+**3. Запусти короткий тест.** Закрой игру перед запуском и запусти блок в той же Konsole. В новой сессии сначала выполни `bash`, перейди в каталог репозитория и активируй `.venv-deck`, как выше.
+
+```bash
+set -o pipefail
+python -u deck_qwen.py --offline --threads 4 --tokens 16 2>&1 | tee deck-generation.log
+```
+
+Тест задаёт вопрос о столице Испании и печатает ответ модели. В конце лога будут `load_s` (загрузка модели), `first_token_s` (обработка запроса до первого токена), `decode_tokens_s` (последующие токены в секунду) и `peak_rss_mib` (пиковая RAM всего процесса, включая загрузку). Если модель сразу выдаст конец ответа, скорость последующих токенов будет `null`. Чтобы сравнить 4 и 8 потоков, повтори команду с `--threads 8` и другим именем лога. Для сравнения используй одинаковый лимит мощности и один режим питания.
+
+**4. При желании проверь качество на WikiText-2.** Для первого запуска нужен интернет, чтобы скачать тестовую выборку. Сначала оцени длительность одного блока из 2048 токенов. Параметр `--offline` относится к весам модели.
+
+```bash
+uv pip install 'datasets==3.5.0'
+python -u deck_qwen.py --offline --ppl-blocks 1 2>&1 | tee deck-ppl-one.log
+```
+
+Для сопоставления с опубликованным результатом запусти полный тест. Короткая проверка одного блока даёт другую выборку. Издатель чекпойнта указывает **24,48** на полном WikiText-2. Наш CPU-загрузчик и вычисления BF16 могут дать другое значение.
+
+```bash
+python -u deck_qwen.py --offline --ppl-blocks 0 2>&1 | tee deck-ppl-full.log
+```
+
+**Если тест прервётся.** При ошибке загрузки проверь свободное место через `df -h ~/.cache`. Если процесс завершится сообщением `Killed`, посмотри сообщения ядра через `journalctl -k -b | grep -Ei 'out of memory|oom|killed process' | tail`. Для разбора достаточно файла `deck-generation.log` либо последних строк ошибки, вывода `free -h` и, если запускал оценку, лога PPL.
+
+Загрузчик в `deck_qwen.py` создаёт каркас Qwen3 без выделения памяти под исходные 8 млрд плотных весов. Знаки факторов остаются упакованными между вызовами слоёв и распаковываются для текущего матричного умножения. Это переносимая реализация для замера на CPU. Проверены разбор битов, обработка дополнения строк и интерфейс командной строки. Полная модель на физическом Steam Deck ещё не проверена.
+
+[Карточка и метрики модели](https://huggingface.co/LittleBitLLM/littlebit-qwen3-8b-0.55bpw) · [Формат бинарных факторов SamsungLabs](https://github.com/SamsungLabs/LittleBit/blob/0ceadcfa842b2c26e14a6e00d98d47aed8e53dde/quantization/utils/binary_packer.py)
+
 ## Measured CPU results
 
 Eight hand-written English story openings, 537 next-token predictions. Each line starts at BOS and is scored independently without EOS. The original FP32 model scored 6.9403921 perplexity. As a cross-check, Karpathy's C tokenizer and forward pass scored the same 537 targets at 6.9403928.
