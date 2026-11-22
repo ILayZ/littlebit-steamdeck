@@ -79,7 +79,7 @@ At startup the runner prints the selected adapter after comparing shader output 
 | Decode rate (tokens/s) | 0.2180 | 0.4357 |
 | Peak process RSS (MiB) | 2140.0 | 2147.1 |
 
-Both runs used the same checkpoint revision, four CPU threads, a 19-token prompt and 16 generated tokens. The Vulkan run decoded 2.00 times as fast across the 15 steps after the first token. These are single runs. The generated continuations differed, and neither named Madrid within the token limit. End-to-end numerical agreement and WikiText-2 perplexity on this device remain unmeasured.
+Both runs used the same checkpoint revision, four CPU threads, a 19-token prompt and 16 generated tokens. The Vulkan run decoded 2.00 times as fast across the 15 steps after the first token. These are single runs. The generated continuations differed, and neither named Madrid within the token limit. The paired logit comparison below measures agreement on this prompt. WikiText-2 perplexity on this device remains unmeasured.
 
 ### Compare CPU and Vulkan next-token logits
 
@@ -92,6 +92,8 @@ python -u deck_qwen.py --offline --backend compare --threads 4 --tokens 16 2>&1 
 ```
 
 The CPU generates a greedy continuation of the benchmark prompt. Vulkan then replays those exact input IDs using its own KV cache, even if it would have chosen a different token. The two models load sequentially. Position 1 is the first prediction after the prompt. For each position, the log records both winning IDs and text, the gap to each backend's runner-up, and the maximum absolute and RMS differences across the full vocabulary of logits. A zero gap indicates a tie. `first_top1_mismatch` is one-based or null if all choices agree. Matching choices can still have different logits. This is a numerical comparison on one CPU-selected trajectory.
+
+On the Steam Deck OLED, CPU and Vulkan chose the same top token at 15 of 16 positions under CPU-token replay. Both reproduced the seven tokens of the question. At position 8, CPU selected token 690 (a space followed by `</`) with a top-two logit gap of zero. Vulkan selected token 4710 (a space followed by two newlines) with a gap of 0.0625. At this position the maximum absolute logit difference across the vocabulary was 0.15625 and the RMS difference was 0.03037. The log records each winner and its margin; the identity of the CPU runner-up is unknown. Both backends agreed at positions 9–16 when given the CPU continuation. Independent generation follows different prefixes after position 8.
 
 ## Measured CPU results
 
