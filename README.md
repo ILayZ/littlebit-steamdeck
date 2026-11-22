@@ -95,6 +95,22 @@ The CPU generates a greedy continuation of the benchmark prompt. Vulkan then rep
 
 On the Steam Deck OLED, CPU and Vulkan chose the same top token at 15 of 16 positions under CPU-token replay. Both reproduced the seven tokens of the question. At position 8, CPU selected token 690 (a space followed by `</`) with a top-two logit gap of zero. Vulkan selected token 4710 (a space followed by two newlines) with a gap of 0.0625. At this position the maximum absolute logit difference across the vocabulary was 0.15625 and the RMS difference was 0.03037. The log records each winner and its margin; the identity of the CPU runner-up is unknown. Both backends agreed at positions 9–16 when given the CPU continuation. Independent generation follows different prefixes after position 8.
 
+## Colab Tesla T4 comparison
+
+The [Colab notebook](https://colab.research.google.com/github/ILayZ/littlebit-steamdeck/blob/main/colab_gpu.ipynb) ran the same Qwen3-8B checkpoint revision, 19-token prompt and 16-token greedy generation on a Tesla T4 with PyTorch 2.14.1+cu130 and CUDA 13.0. All three generations used one model load (9.82 s). Each decode rate covers the 15 tokens after the first.
+
+| T4 run | Time to first token (s) | Decode rate (tokens/s) |
+| --- | ---: | ---: |
+| First | 5.311 | 5.361 |
+| Second | 0.235 | 5.633 |
+| Third | 0.236 | 5.619 |
+
+Median T4 decode throughput was **5.619 tokens/s**, about **12.9×** the Deck hybrid Vulkan result (0.436) and **25.8×** its CPU result (0.218). The Deck Vulkan first token took 3.82 s with lazy weight upload. A comparable warm Deck first-token measurement is pending.
+
+Peak PyTorch-allocated T4 memory was **8,443 MiB (8.25 GiB)**. The T4 runner caches unpacked int8 sign factors in VRAM and uses FP32 for matrix multiplication. The Deck Vulkan runner caches packed factors and runs part of the model on CPU. These ratios compare complete inference implementations. The Deck process RSS and T4 allocator peak cover different memory allocations.
+
+All three T4 runs produced the same decoded text as the Deck CPU on this prompt, repeating the question and starting a citation. None named Madrid within the 16-token limit.
+
 ## Measured CPU results
 
 Eight hand-written English story openings, 537 next-token predictions. Each line starts at BOS and is scored independently without EOS. The original FP32 model scored 6.9403921 perplexity. As a cross-check, Karpathy's C tokenizer and forward pass scored the same 537 targets at 6.9403928.
